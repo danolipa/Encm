@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ku" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ئینسایکلۆپیدیای ئینکارتا ٢٠٠٩</title>
+    <!-- Tailwind CSS بۆ دیزاینی مۆدێرن -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700&display=swap');
+        body { font-family: 'Vazirmatn', sans-serif; background-color: #090d16; color: #f1f5f9; }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+    <!-- سەرۆک و گەڕان (Header) -->
+    <header class="glass p-4 shadow-lg z-10">
+        <div class="flex justify-between items-center mb-3">
+            <h1 class="text-lg font-bold text-sky-400 flex items-center gap-2">
+                <span class="text-2xl">📚</span> ئینکارتا ٢٠٠٩
+            </h1>
+            <span id="db-status" class="text-xs bg-slate-800 text-sky-300 px-2.5 py-1 rounded-full border border-slate-700">چاوەڕێی داتا...</span>
+        </div>
+        <div class="relative">
+            <input type="text" id="search-box" placeholder="گەڕان لەناو ٦٠,٠٠٠ وتاردا..." 
+                class="w-full bg-slate-900/90 text-white placeholder-slate-400 text-sm px-4 py-3 rounded-xl border border-slate-700 focus:outline-none focus:border-sky-500 transition shadow-inner">
+            <span class="absolute left-3 top-3.5 text-slate-400">🔍</span>
+        </div>
+    </header>
+
+    <!-- ناوەڕۆکی سەرەکی / لیستی وتارەکان -->
+    <main class="flex-1 overflow-y-auto p-4 custom-scroll space-y-3" id="articles-container">
+        <div class="text-center py-20 text-slate-500">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-sky-500 border-t-transparent mb-3"></div>
+            <p class="text-sm">داتابەیس بار دەکرێت، تکایە کەمێک چاوەڕێ بە...</p>
+        </div>
+    </main>
+
+    <!-- پەنجەرەی خوێندنەوەی وتار (Modal) -->
+    <div id="article-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex flex-col justify-end sm:justify-center p-0 sm:p-4">
+        <div class="glass bg-slate-900 w-full sm:max-w-2xl sm:rounded-2xl rounded-t-3xl max-h-[85vh] flex flex-col border border-slate-700 shadow-2xl overflow-hidden">
+            <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/90">
+                <h2 id="modal-title" class="text-base font-bold text-sky-300 truncate pl-4"></h2>
+                <button onclick="closeModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition">✕</button>
+            </div>
+            <div id="modal-content" class="p-5 overflow-y-auto custom-scroll text-sm leading-relaxed text-slate-300 space-y-4"></div>
+        </div>
+    </div>
+
+    <script>
+        let db = null;
+        let dbLoaded = false;
+
+        // بارکردنی داتابەیسی SQLite بە شێوەی WebAssembly
+        async function initDatabase() {
+            try {
+                const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` });
+                
+                // لێرەدا دەتوانیت لینکی فایلی encarta_60k_android.db دابنێیت کە خستتە ناو گۆگڵ درایڤ یان گیتهەب
+                const response = await fetch('encarta_60k_android.db');
+                const buffer = await response.arrayBuffer();
+                db = new SQL.Database(new Uint8Array(buffer));
+                
+                dbLoaded = true;
+                document.getElementById('db-status').innerText = 'داتابەیس ئامادەیە ✅';
+                loadInitialArticles();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('db-status').innerText = 'کێشە لە بارکردندا ❌';
+                document.getElementById('articles-container').innerHTML = `
+                    <div class="glass p-6 rounded-2xl text-center border border-red-500/30">
+                        <p class="text-red-400 text-sm font-medium">نەتوانرا فایلی داتابەیس بخوێنرێتەوە!</p>
+                        <p class="text-xs text-slate-400 mt-2">تکایە فایلی encarta_60k_android.db بخە هەمان فۆڵدەری ئەم فایلە.</p>
+                    </div>`;
+            }
+        }
+
+        function loadInitialArticles() {
+            if (!dbLoaded) return;
+            const res = db.exec("SELECT id, title, summary FROM articles LIMIT 30;");
+            renderArticles(res);
+        }
+
+        function renderArticles(resultSet) {
+            const container = document.getElementById('articles-container');
+            if (!resultSet.length || !resultSet[0].values.length) {
+                container.innerHTML = '<div class="text-center py-12 text-slate-500">هیچ وتارێک نەدۆزراوەتەوە.</div>';
+                return;
+            }
+
+            let html = '';
+            resultSet[0].values.forEach(row => {
+                const [id, title, summary] = row;
+                html += `
+                    <div onclick="openArticle(${id})" class="glass p-4 rounded-2xl active:scale-[0.98] transition cursor-pointer hover:border-sky-500/50">
+                        <h3 class="font-bold text-sky-400 text-sm mb-1">${escapeHtml(title)}</h3>
+                        <p class="text-xs text-slate-400 line-clamp-2">${escapeHtml(summary || '')}</p>
+                    </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        // گەڕانی خێرا
+        let searchTimer;
+        document.getElementById('search-box').addEventListener('input', (e) => {
+            clearTimeout(searchTimer);
+            const query = e.target.value.trim();
+            if (!dbLoaded) return;
+
+            if (query.length < 2) {
+                loadInitialArticles();
+                return;
+            }
+
+            searchTimer = setTimeout(() => {
+                try {
+                    // بەکارهێنانی FTS4 بۆ گەڕانی چرکەیی
+                    const stmt = db.prepare(`
+                        a.id, a.title, a.summary 
+                        FROM articles a 
+                        JOIN articles_fts f ON a.id = f.rowid 
+                        WHERE articles_fts MATCH :q 
+                        LIMIT 40
+                    `);
+                    // لێرەدا بە ساده‌وه‌ LIKE بەکاردەهێنین بۆ مسۆگەرکردنی نەبوونی هەڵە لەسەر مۆبייל
+                    const safeQ = `%${query}%`;
+                    const res = db.exec(`SELECT id, title, summary FROM articles WHERE title LIKE '${safeQ}' OR content LIKE '${safeQ}' LIMIT 40;`);
+                    renderArticles(res);
+                } catch (err) {
+                    console.error(err);
+                }
+            }, 300);
+        });
+
+        function openArticle(id) {
+            if (!db) return;
+            const stmt = db.prepare("SELECT title, content FROM articles WHERE id = :id");
+            stmt.bind({ ':id': id });
+            if (stmt.step()) {
+                const row = stmt.get();
+                document.getElementById('modal-title').innerText = row[0];
+                document.getElementById('modal-content').innerHTML = `<p class="whitespace-pre-line">${escapeHtml(row[1])}</p>`;
+                document.getElementById('article-modal').classList.remove('hidden');
+            }
+            stmt.free();
+        }
+
+        function closeModal() {
+            document.getElementById('article-modal').classList.add('hidden');
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // دەستپێکردن
+        initDatabase();
+    </script>
+</body>
+</html>
